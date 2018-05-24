@@ -95,10 +95,52 @@ metadata {
 	}
 }
 
-// UI - supporting functions
-def resetMotionTile() {
-	logging("${device.displayName} - Executing resetMotionTile()", "info")
-	sendEvent(name: "motionText", value: "--", displayed: false)
+// Parameter configuration, synchronization and verification
+def updated() {
+	if (state.lastUpdated && (now() - state.lastUpdated) < 500) return
+	logging("${device.displayName} - Executing updated()", "info")
+
+	if (settings.tamperOperatingMode as Integer == 0) {
+		resetMotionTile()
+	}
+
+	syncStart()
+	state.lastUpdated = now()
+}
+
+def configure() {
+	def cmds = []
+	cmds << zwave.batteryV1.batteryGet()
+	cmds << zwave.sensorMultilevelV5.sensorMultilevelGet(sensorType: 1)
+	encapSequence(cmds, 1000)
+}
+
+/*
+####################
+## Z-Wave Toolkit ##
+####################
+*/
+
+def parse(String description) {
+	def result = []
+	logging("${device.displayName} - Parsing: ${description}")
+	if (description.startsWith("Err 106")) {
+		result = createEvent(
+			descriptionText: "Failed to complete the network security key exchange. If you are unable to receive data from it, you must remove it from your network and add it again.",
+			eventType: "ALERT",
+			name: "secureInclusion",
+			value: "failed",
+			displayed: true,
+		)
+	} else if (description == "updated") {
+		return null
+	} else {
+		def cmd = zwave.parse(description, cmdVersions())
+		if (cmd) {
+			logging("${device.displayName} - Parsed: ${cmd}")
+			zwaveEvent(cmd)
+		}
+	}
 }
 
 // Event handlers and supporting functions
@@ -136,6 +178,73 @@ def zwaveEvent(physicalgraph.zwave.commands.sensormultilevelv5.SensorMultilevelR
 	}
 }
 
+
+def zwaveEvent(physicalgraph.zwave.commands.wakeupv2.WakeUpNotification cmd) {
+	logging("${device.displayName} woke up", "info")
+	def cmds = []
+	sendEvent(descriptionText: "$device.displayName woke up", isStateChange: true)
+	if (state.wakeUpInterval?.state == "notSynced" && state.wakeUpInterval?.value != null) {
+		cmds << zwave.wakeUpV2.wakeUpIntervalSet(seconds: state.wakeUpInterval.value as Integer, nodeid: zwaveHubNodeId)
+		state.wakeUpInterval.state = "synced"
+	}
+	cmds << zwave.batteryV1.batteryGet()
+	cmds << zwave.sensorMultilevelV5.sensorMultilevelGet(sensorType: 1)
+	runIn(1, "syncNext")
+	[response(encapSequence(cmds, 1000))]
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.configurationv2.ConfigurationReport cmd) {
+	def paramKey = parameterMap().find({ it.num == cmd.parameterNumber }).key
+	logging("${device.displayName} - Parameter ${paramKey} value is ${cmd.scaledConfigurationValue} expected " + state."$paramKey".value, "info")
+	state."$paramKey".state = (state."$paramKey".value == cmd.scaledConfigurationValue) ? "synced" : "incorrect"
+	syncNext()
+}
+
+
+def zwaveEvent(physicalgraph.zwave.commands.applicationstatusv1.ApplicationRejectedRequest cmd) {
+	logging("${device.displayName} - rejected request!", "warn")
+	for (param in parameterMap()) {
+		if (state."$param.key"?.state == "inProgress") {
+			state."$param.key"?.state = "failed"
+			break
+		}
+	}
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.deviceresetlocallyv1.DeviceResetLocallyNotification cmd) {
+	log.warn "${device.displayName} - received command: $cmd - device has reset itself"
+}
+
+
+def zwaveEvent(physicalgraph.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
+	def encapsulatedCommand = cmd.encapsulatedCommand(cmdVersions())
+	if (encapsulatedCommand) {
+		logging("${device.displayName} - Parsed SecurityMessageEncapsulation into: ${encapsulatedCommand}")
+		zwaveEvent(encapsulatedCommand)
+	} else {
+		log.warn "Unable to extract secure cmd from $cmd"
+	}
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.crc16encapv1.Crc16Encap cmd) {
+	def version = cmdVersions()[cmd.commandClass as Integer]
+	def ccObj = version ? zwave.commandClass(cmd.commandClass, version) : zwave.commandClass(cmd.commandClass)
+	def encapsulatedCommand = ccObj?.command(cmd.command)?.parse(cmd.data)
+	if (encapsulatedCommand) {
+		logging("${device.displayName} - Parsed Crc16Encap into: ${encapsulatedCommand}")
+		zwaveEvent(encapsulatedCommand)
+	} else {
+		log.warn "Could not extract crc16 command from $cmd"
+	}
+}
+
+// UI - supporting functions
+def resetMotionTile() {
+	logging("${device.displayName} - Executing resetMotionTile()", "info")
+	sendEvent(name: "motionText", value: "--", displayed: false)
+}
+
+
 private motionEvent(Integer sensorType, value) {
 	logging("${device.displayName} - Executing motionEvent() with parameters: ${sensorType}, ${value}", "info")
 	def axisMap = [52: "yAxis", 53: "zAxis", 54: "xAxis"]
@@ -158,26 +267,6 @@ private axisEvent() {
 	def zAxis = Math.round((device.currentValue("zAxis") as Float) * 100)
 	sendEvent(name: "motionText", value: "X: ${device.currentValue("xAxis")}\nY: ${device.currentValue("yAxis")}\nZ: ${device.currentValue("zAxis")}", displayed: false)
 	sendEvent(name: "threeAxis", value: "${xAxis},${yAxis},${zAxis}", isStateChange: true, displayed: false)
-}
-
-// Parameter configuration, synchronization and verification
-def updated() {
-	if (state.lastUpdated && (now() - state.lastUpdated) < 500) return
-	logging("${device.displayName} - Executing updated()", "info")
-
-	if (settings.tamperOperatingMode as Integer == 0) {
-		resetMotionTile()
-	}
-
-	syncStart()
-	state.lastUpdated = now()
-}
-
-def configure() {
-	def cmds = []
-	cmds << zwave.batteryV1.batteryGet()
-	cmds << zwave.sensorMultilevelV5.sensorMultilevelGet(sensorType: 1)
-	encapSequence(cmds, 1000)
 }
 
 private syncStart() {
@@ -264,92 +353,6 @@ private multiStatusEvent(String statusValue, boolean force = false, boolean disp
 	}
 }
 
-def zwaveEvent(physicalgraph.zwave.commands.wakeupv2.WakeUpNotification cmd) {
-	logging("${device.displayName} woke up", "info")
-	def cmds = []
-	sendEvent(descriptionText: "$device.displayName woke up", isStateChange: true)
-	if (state.wakeUpInterval?.state == "notSynced" && state.wakeUpInterval?.value != null) {
-		cmds << zwave.wakeUpV2.wakeUpIntervalSet(seconds: state.wakeUpInterval.value as Integer, nodeid: zwaveHubNodeId)
-		state.wakeUpInterval.state = "synced"
-	}
-	cmds << zwave.batteryV1.batteryGet()
-	cmds << zwave.sensorMultilevelV5.sensorMultilevelGet(sensorType: 1)
-	runIn(1, "syncNext")
-	[response(encapSequence(cmds, 1000))]
-}
-
-def zwaveEvent(physicalgraph.zwave.commands.configurationv2.ConfigurationReport cmd) {
-	def paramKey = parameterMap().find({ it.num == cmd.parameterNumber }).key
-	logging("${device.displayName} - Parameter ${paramKey} value is ${cmd.scaledConfigurationValue} expected " + state."$paramKey".value, "info")
-	state."$paramKey".state = (state."$paramKey".value == cmd.scaledConfigurationValue) ? "synced" : "incorrect"
-	syncNext()
-}
-
-
-def zwaveEvent(physicalgraph.zwave.commands.applicationstatusv1.ApplicationRejectedRequest cmd) {
-	logging("${device.displayName} - rejected request!", "warn")
-	for (param in parameterMap()) {
-		if (state."$param.key"?.state == "inProgress") {
-			state."$param.key"?.state = "failed"
-			break
-		}
-	}
-}
-
-def zwaveEvent(physicalgraph.zwave.commands.deviceresetlocallyv1.DeviceResetLocallyNotification cmd) {
-	log.warn "${device.displayName} - received command: $cmd - device has reset itself"
-}
-
-/*
-####################
-## Z-Wave Toolkit ##
-####################
-*/
-
-def parse(String description) {
-	def result = []
-	logging("${device.displayName} - Parsing: ${description}")
-	if (description.startsWith("Err 106")) {
-		result = createEvent(
-			descriptionText: "Failed to complete the network security key exchange. If you are unable to receive data from it, you must remove it from your network and add it again.",
-			eventType: "ALERT",
-			name: "secureInclusion",
-			value: "failed",
-			displayed: true,
-		)
-	} else if (description == "updated") {
-		return null
-	} else {
-		def cmd = zwave.parse(description, cmdVersions())
-		if (cmd) {
-			logging("${device.displayName} - Parsed: ${cmd}")
-			zwaveEvent(cmd)
-		}
-	}
-}
-
-def zwaveEvent(physicalgraph.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
-	def encapsulatedCommand = cmd.encapsulatedCommand(cmdVersions())
-	if (encapsulatedCommand) {
-		logging("${device.displayName} - Parsed SecurityMessageEncapsulation into: ${encapsulatedCommand}")
-		zwaveEvent(encapsulatedCommand)
-	} else {
-		log.warn "Unable to extract secure cmd from $cmd"
-	}
-}
-
-def zwaveEvent(physicalgraph.zwave.commands.crc16encapv1.Crc16Encap cmd) {
-	def version = cmdVersions()[cmd.commandClass as Integer]
-	def ccObj = version ? zwave.commandClass(cmd.commandClass, version) : zwave.commandClass(cmd.commandClass)
-	def encapsulatedCommand = ccObj?.command(cmd.command)?.parse(cmd.data)
-	if (encapsulatedCommand) {
-		logging("${device.displayName} - Parsed Crc16Encap into: ${encapsulatedCommand}")
-		zwaveEvent(encapsulatedCommand)
-	} else {
-		log.warn "Could not extract crc16 command from $cmd"
-	}
-}
-
 private logging(text, type = "debug") {
 	if (settings.logging == "true") {
 		log."$type" text
@@ -390,6 +393,7 @@ private List intToParam(Long value, Integer size = 1) {
 	}
 	return result
 }
+
 /*
 ##########################
 ## Device Configuration ##
