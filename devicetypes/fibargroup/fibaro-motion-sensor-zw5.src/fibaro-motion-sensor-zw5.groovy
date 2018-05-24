@@ -88,6 +88,25 @@ def updated() {
 	}
 }
 
+def configure() {
+	log.debug "Executing 'configure'"
+	// Device-Watch simply pings if no device events received for 8 hrs & 2 minutes
+	sendEvent(name: "checkInterval", value: 8 * 60 * 60 + 2 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID])
+
+	def cmds = []
+
+	cmds += zwave.wakeUpV2.wakeUpIntervalSet(seconds: 7200, nodeid: zwaveHubNodeId)//FGMS' default wake up interval
+	cmds += zwave.manufacturerSpecificV2.deviceSpecificGet()
+	cmds += zwave.associationV2.associationSet(groupingIdentifier: 1, nodeId: [zwaveHubNodeId])
+	cmds += zwave.batteryV1.batteryGet()
+	cmds += zwave.sensorMultilevelV5.sensorMultilevelGet(sensorType: 1, scale: 0)
+	cmds += zwave.sensorMultilevelV5.sensorMultilevelGet(sensorType: 3, scale: 1)
+	cmds += zwave.sensorBinaryV2.sensorBinaryGet()
+	cmds += zwave.wakeUpV2.wakeUpNoMoreInformation()
+
+	encapSequence(cmds, 500)
+}
+
 // parse events into attributes
 def parse(String description) {
 	log.debug "Parsing '${description}'"
@@ -269,25 +288,6 @@ def zwaveEvent(physicalgraph.zwave.commands.sensorbinaryv2.SensorBinaryReport cm
 
 def zwaveEvent(physicalgraph.zwave.Command cmd) {
 	log.debug "Catchall reached for cmd: $cmd"
-}
-
-def configure() {
-	log.debug "Executing 'configure'"
-	// Device-Watch simply pings if no device events received for 8 hrs & 2 minutes
-	sendEvent(name: "checkInterval", value: 8 * 60 * 60 + 2 * 60, displayed: false, data: [protocol: "zwave", hubHardwareId: device.hub.hardwareID])
-
-	def cmds = []
-
-	cmds += zwave.wakeUpV2.wakeUpIntervalSet(seconds: 7200, nodeid: zwaveHubNodeId)//FGMS' default wake up interval
-	cmds += zwave.manufacturerSpecificV2.deviceSpecificGet()
-	cmds += zwave.associationV2.associationSet(groupingIdentifier: 1, nodeId: [zwaveHubNodeId])
-	cmds += zwave.batteryV1.batteryGet()
-	cmds += zwave.sensorMultilevelV5.sensorMultilevelGet(sensorType: 1, scale: 0)
-	cmds += zwave.sensorMultilevelV5.sensorMultilevelGet(sensorType: 3, scale: 1)
-	cmds += zwave.sensorBinaryV2.sensorBinaryGet()
-	cmds += zwave.wakeUpV2.wakeUpNoMoreInformation()
-
-	encapSequence(cmds, 500)
 }
 
 private secure(physicalgraph.zwave.Command cmd) {
