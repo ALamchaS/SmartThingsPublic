@@ -144,78 +144,6 @@ def parse(String description) {
 }
 
 // Event handlers and supporting functions
-def zwaveEvent(physicalgraph.zwave.commands.notificationv3.NotificationReport cmd) {
-	logging("${device.displayName} - NotificationReport received for ${cmd.event}, parameter value: ${cmd.eventParameter[0]}", "info")
-	def lastTime = new Date().format("yyyy MMM dd EEE h:mm:ss a", location.timeZone)
-	if (cmd.notificationType == 7) {
-		if (cmd.event == 0) {
-			sendEvent(name: (cmd.eventParameter[0] == 3) ? "tamper" : "motion", value: (cmd.eventParameter[0] == 3) ? "clear" : "inactive")
-		} else {
-			sendEvent(name: (cmd.event == 3) ? "tamper" : "motion", value: (cmd.event == 3) ? "detected" : "active")
-			multiStatusEvent((cmd.event == 3) ? "Tamper - $lastTime" : "Motion - $lastTime")
-		}
-	}
-}
-
-def zwaveEvent(physicalgraph.zwave.commands.batteryv1.BatteryReport cmd) {
-	logging("${device.displayName} - BatteryReport received, value: ${cmd.batteryLevel}", "info")
-	sendEvent(name: "battery", value: cmd.batteryLevel.toString(), unit: "%", displayed: true, isStateChange: true)
-}
-
-def zwaveEvent(physicalgraph.zwave.commands.sensormultilevelv5.SensorMultilevelReport cmd) {
-	logging("${device.displayName} - SensorMultilevelReport received, sensor: ${cmd.sensorType}, scaledValue: ${cmd.scaledSensorValue}", "info")
-	switch (cmd.sensorType as Integer) {
-		case 1:
-			def cmdScale = cmd.scale == 1 ? "F" : "C"
-			sendEvent(name: "temperature", unit: getTemperatureScale(), value: convertTemperatureIfNeeded(cmd.scaledSensorValue, cmdScale, cmd.precision), displayed: true)
-			break
-		case 3:
-			sendEvent(name: "illuminance", value: cmd.scaledSensorValue.toInteger().toString(), unit: "lux", displayed: true)
-			break
-		case [25, 52, 53, 54]:
-			motionEvent(cmd.sensorType, cmd.scaledSensorValue)
-			break
-	}
-}
-
-
-def zwaveEvent(physicalgraph.zwave.commands.wakeupv2.WakeUpNotification cmd) {
-	logging("${device.displayName} woke up", "info")
-	def cmds = []
-	sendEvent(descriptionText: "$device.displayName woke up", isStateChange: true)
-	if (state.wakeUpInterval?.state == "notSynced" && state.wakeUpInterval?.value != null) {
-		cmds << zwave.wakeUpV2.wakeUpIntervalSet(seconds: state.wakeUpInterval.value as Integer, nodeid: zwaveHubNodeId)
-		state.wakeUpInterval.state = "synced"
-	}
-	cmds << zwave.batteryV1.batteryGet()
-	cmds << zwave.sensorMultilevelV5.sensorMultilevelGet(sensorType: 1)
-	runIn(1, "syncNext")
-	[response(encapSequence(cmds, 1000))]
-}
-
-def zwaveEvent(physicalgraph.zwave.commands.configurationv2.ConfigurationReport cmd) {
-	def paramKey = parameterMap().find({ it.num == cmd.parameterNumber }).key
-	logging("${device.displayName} - Parameter ${paramKey} value is ${cmd.scaledConfigurationValue} expected " + state."$paramKey".value, "info")
-	state."$paramKey".state = (state."$paramKey".value == cmd.scaledConfigurationValue) ? "synced" : "incorrect"
-	syncNext()
-}
-
-
-def zwaveEvent(physicalgraph.zwave.commands.applicationstatusv1.ApplicationRejectedRequest cmd) {
-	logging("${device.displayName} - rejected request!", "warn")
-	for (param in parameterMap()) {
-		if (state."$param.key"?.state == "inProgress") {
-			state."$param.key"?.state = "failed"
-			break
-		}
-	}
-}
-
-def zwaveEvent(physicalgraph.zwave.commands.deviceresetlocallyv1.DeviceResetLocallyNotification cmd) {
-	log.warn "${device.displayName} - received command: $cmd - device has reset itself"
-}
-
-
 def zwaveEvent(physicalgraph.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
 	def encapsulatedCommand = cmd.encapsulatedCommand(cmdVersions())
 	if (encapsulatedCommand) {
@@ -235,6 +163,77 @@ def zwaveEvent(physicalgraph.zwave.commands.crc16encapv1.Crc16Encap cmd) {
 		zwaveEvent(encapsulatedCommand)
 	} else {
 		log.warn "Could not extract crc16 command from $cmd"
+	}
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.sensormultilevelv5.SensorMultilevelReport cmd) {
+	logging("${device.displayName} - SensorMultilevelReport received, sensor: ${cmd.sensorType}, scaledValue: ${cmd.scaledSensorValue}", "info")
+	switch (cmd.sensorType as Integer) {
+		case 1:
+			def cmdScale = cmd.scale == 1 ? "F" : "C"
+			sendEvent(name: "temperature", unit: getTemperatureScale(), value: convertTemperatureIfNeeded(cmd.scaledSensorValue, cmdScale, cmd.precision), displayed: true)
+			break
+		case 3:
+			sendEvent(name: "illuminance", value: cmd.scaledSensorValue.toInteger().toString(), unit: "lux", displayed: true)
+			break
+		case [25, 52, 53, 54]:
+			motionEvent(cmd.sensorType, cmd.scaledSensorValue)
+			break
+	}
+}
+
+
+def zwaveEvent(physicalgraph.zwave.commands.notificationv3.NotificationReport cmd) {
+	logging("${device.displayName} - NotificationReport received for ${cmd.event}, parameter value: ${cmd.eventParameter[0]}", "info")
+	def lastTime = new Date().format("yyyy MMM dd EEE h:mm:ss a", location.timeZone)
+	if (cmd.notificationType == 7) {
+		if (cmd.event == 0) {
+			sendEvent(name: (cmd.eventParameter[0] == 3) ? "tamper" : "motion", value: (cmd.eventParameter[0] == 3) ? "clear" : "inactive")
+		} else {
+			sendEvent(name: (cmd.event == 3) ? "tamper" : "motion", value: (cmd.event == 3) ? "detected" : "active")
+			multiStatusEvent((cmd.event == 3) ? "Tamper - $lastTime" : "Motion - $lastTime")
+		}
+	}
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.batteryv1.BatteryReport cmd) {
+	logging("${device.displayName} - BatteryReport received, value: ${cmd.batteryLevel}", "info")
+	sendEvent(name: "battery", value: cmd.batteryLevel.toString(), unit: "%", displayed: true, isStateChange: true)
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.wakeupv2.WakeUpNotification cmd) {
+	logging("${device.displayName} woke up", "info")
+	def cmds = []
+	sendEvent(descriptionText: "$device.displayName woke up", isStateChange: true)
+	if (state.wakeUpInterval?.state == "notSynced" && state.wakeUpInterval?.value != null) {
+		cmds << zwave.wakeUpV2.wakeUpIntervalSet(seconds: state.wakeUpInterval.value as Integer, nodeid: zwaveHubNodeId)
+		state.wakeUpInterval.state = "synced"
+	}
+	cmds << zwave.batteryV1.batteryGet()
+	cmds << zwave.sensorMultilevelV5.sensorMultilevelGet(sensorType: 1)
+	runIn(1, "syncNext")
+	[response(encapSequence(cmds, 1000))]
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.deviceresetlocallyv1.DeviceResetLocallyNotification cmd) {
+	log.warn "${device.displayName} - received command: $cmd - device has reset itself"
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.configurationv2.ConfigurationReport cmd) {
+	def paramKey = parameterMap().find({ it.num == cmd.parameterNumber }).key
+	logging("${device.displayName} - Parameter ${paramKey} value is ${cmd.scaledConfigurationValue} expected " + state."$paramKey".value, "info")
+	state."$paramKey".state = (state."$paramKey".value == cmd.scaledConfigurationValue) ? "synced" : "incorrect"
+	syncNext()
+}
+
+
+def zwaveEvent(physicalgraph.zwave.commands.applicationstatusv1.ApplicationRejectedRequest cmd) {
+	logging("${device.displayName} - rejected request!", "warn")
+	for (param in parameterMap()) {
+		if (state."$param.key"?.state == "inProgress") {
+			state."$param.key"?.state = "failed"
+			break
+		}
 	}
 }
 
@@ -370,6 +369,10 @@ private crcEncap(physicalgraph.zwave.Command cmd) {
 	//"5601${cmd.format()}0000"
 }
 
+private encapSequence(cmds, delay = 250) {
+	delayBetween(cmds.collect { encap(it) }, delay)
+}
+
 private encap(physicalgraph.zwave.Command cmd) {
 	if (zwaveInfo.zw.contains("s")) {
 		secEncap(cmd)
@@ -379,10 +382,6 @@ private encap(physicalgraph.zwave.Command cmd) {
 		logging("${device.displayName} - no encapsulation supported for command: $cmd", "info")
 		cmd.format()
 	}
-}
-
-private encapSequence(cmds, delay = 250) {
-	delayBetween(cmds.collect { encap(it) }, delay)
 }
 
 private List intToParam(Long value, Integer size = 1) {
