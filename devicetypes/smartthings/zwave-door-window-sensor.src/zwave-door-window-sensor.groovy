@@ -286,7 +286,7 @@ def initialPoll() {
 	request << zwave.batteryV1.batteryGet()
 	request << zwave.sensorBinaryV2.sensorBinaryGet(sensorType: zwave.sensorBinaryV2.SENSOR_TYPE_DOOR_WINDOW)
 	request << zwave.manufacturerSpecificV2.manufacturerSpecificGet()
-	commands(request, 500) + ["delay 6000", command(zwave.wakeUpV1.wakeUpNoMoreInformation())]
+	commands(request, 500)
 }
 
 private command(physicalgraph.zwave.Command cmd) {
