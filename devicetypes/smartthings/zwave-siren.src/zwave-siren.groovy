@@ -24,10 +24,13 @@ metadata {
 		capability "Refresh"
 		capability "Sensor"
 		capability "Switch"
+		capability "Configuration"
 		capability "Health Check"
 
 		fingerprint inClusters: "0x20,0x25,0x86,0x80,0x85,0x72,0x71"
 		fingerprint mfr: "0258", prod: "0003", model: "0088", deviceJoinName: "Neo Coolcam Siren Alarm"
+		//zw:F type:1005 mfr:0258 prod:0003 model:1088 ver:2.94 zwv:4.38 lib:06 cc:5E,86,72,5A,73,70,85,59,25,71,87,80 role:07 ff:8F00 ui:8F00
+		fingerprint mfr: "0258", prod: "0003", model: "1088", deviceJoinName: "Zipato Siren Alarm"
 		fingerprint mfr: "021F", prod: "0003", model: "0088", deviceJoinName: "Dome Siren"
 		fingerprint mfr: "0060", prod: "000C", model: "0001", deviceJoinName: "Utilitech Siren"
 	}
@@ -107,6 +110,21 @@ def initialize() {
 	} else {
 		state.initializeCount = 0
 	}
+}
+
+def configure() {
+	log.debug "config"
+	def cmds = []
+	if (zwaveInfo.mfr == "258" && zwaveInfo.model == "1088") {
+		cmds << zwave.configurationV1.configurationSet(parameterNumber: 1, size: 1, configurationValue: [2]).format()
+		cmds << "delay 1000"
+		cmds << zwave.configurationV1.configurationSet(parameterNumber: 5, size: 1, configurationValue: [1]).format()
+		cmds << "delay 1000"
+		cmds << zwave.configurationV1.configurationGet(parameterNumber: 1).format()
+		cmds << "delay 1000"
+		cmds << zwave.configurationV1.configurationGet(parameterNumber: 5).format()
+	}
+	response(cmds)
 }
 
 def createEvents(physicalgraph.zwave.commands.batteryv1.BatteryReport cmd) {
