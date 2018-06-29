@@ -115,7 +115,7 @@ def initialize() {
 def configure() {
 	log.debug "config"
 	def cmds = []
-	if (zwaveInfo.mfr == "258" && zwaveInfo.model == "1088") {
+	if (zwaveInfo.mfr == "0258" && zwaveInfo.model == "1088") {
 		cmds << zwave.configurationV1.configurationSet(parameterNumber: 1, size: 1, configurationValue: [2]).format()
 		cmds << "delay 1000"
 		cmds << zwave.configurationV1.configurationSet(parameterNumber: 5, size: 1, configurationValue: [1]).format()
@@ -162,10 +162,19 @@ private Boolean secondsPast(timestamp, seconds) {
 
 def on() {
 	log.debug "sending on"
-	[
-		zwave.basicV1.basicSet(value: 0xFF).format(),
-		zwave.basicV1.basicGet().format()
-	]
+	if (zwaveInfo.mfr == "0258" && zwaveInfo.model == "1088")
+		[
+			zwave.basicV1.basicSet(value: 0xFF).format(),
+			zwave.basicV1.basicGet().format(),
+			"delay 66000",
+			zwave.basicV1.basicGet().format()
+		]
+	else {
+		[
+			zwave.basicV1.basicSet(value: 0xFF).format(),
+			zwave.basicV1.basicGet().format()
+		]
+	}
 }
 
 def off() {
