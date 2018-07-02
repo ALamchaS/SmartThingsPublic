@@ -119,10 +119,6 @@ def configure() {
 		cmds << zwave.configurationV1.configurationSet(parameterNumber: 1, size: 1, configurationValue: [2]).format()
 		cmds << "delay 1000"
 		cmds << zwave.configurationV1.configurationSet(parameterNumber: 5, size: 1, configurationValue: [1]).format()
-		cmds << "delay 1000"
-		cmds << zwave.configurationV1.configurationGet(parameterNumber: 1).format()
-		cmds << "delay 1000"
-		cmds << zwave.configurationV1.configurationGet(parameterNumber: 5).format()
 	}
 	response(cmds)
 }
@@ -162,19 +158,10 @@ private Boolean secondsPast(timestamp, seconds) {
 
 def on() {
 	log.debug "sending on"
-	if (zwaveInfo.mfr == "0258" && zwaveInfo.model == "1088")
-		[
-			zwave.basicV1.basicSet(value: 0xFF).format(),
-			zwave.basicV1.basicGet().format(),
-			"delay 66000",
-			zwave.basicV1.basicGet().format()
-		]
-	else {
-		[
-			zwave.basicV1.basicSet(value: 0xFF).format(),
-			zwave.basicV1.basicGet().format()
-		]
-	}
+	[
+		zwave.basicV1.basicSet(value: 0xFF).format(),
+		zwave.basicV1.basicGet().format()
+	]
 }
 
 def off() {
@@ -207,16 +194,25 @@ def ping() {
 
 def refresh() {
 	log.debug "sending battery refresh command"
-	[
-		zwave.basicV1.basicGet().format(),
-		zwave.batteryV1.batteryGet().format()
-	]
+	if (zwaveInfo.mfr == "0258" && zwaveInfo.model == "1088")
+		[
+			zwave.basicV1.basicSet(value: 0xFF).format(),
+			zwave.basicV1.basicGet().format(),
+			"delay 63000",
+			zwave.basicV1.basicGet().format()
+		]
+	else {
+		[
+			zwave.basicV1.basicSet(value: 0xFF).format(),
+			zwave.basicV1.basicGet().format()
+		]
+	}
 }
 
 def parse(String description) {
 	log.debug "parse($description)"
 	def result = null
-	def cmd = zwave.parse(description, [0x20: 1])
+	def cmd = zwave.parse(description, [0x20: 1, 0x71: 3])
 	if (cmd) {
 		result = createEvents(cmd)
 	}
@@ -239,6 +235,24 @@ def createEvents(physicalgraph.zwave.commands.basicv1.BasicReport cmd) {
 	[
 		createEvent([name: "switch", value: switchValue, type: "digital", displayed: false]),
 		createEvent([name: "alarm", value: alarmValue, type: "digital"])
+	]
+}
+
+def createEvents(physicalgraph.zwave.commands.notificationv3.NotificationReport cmd) {
+	def isActive = false
+	if (cmd.notificationType == 0x0E) { //Siren notification
+		switch (cmd.event) {
+			case 0x00: // idle
+				isActive = false
+				break
+			case 0x01: // active
+				isActive = true
+				break
+		}
+	}
+	[
+		createEvent([name: "switch", value: isActive ? "on" : "off", displayed: false]),
+		createEvent([name: "alarm", value: isActive ? "both" : "off"])
 	]
 }
 
